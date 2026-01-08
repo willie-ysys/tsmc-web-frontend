@@ -1,0 +1,255 @@
+/* Light theme base */
+:root {
+  --bg: #f7f8fb;
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --brand: #2563eb;
+  --brand-weak: #dbeafe;
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --border: #e5e7eb;
+  --shadow: 0 6px 20px rgba(30, 41, 59, 0.08);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans TC", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  background: var(--bg);
+}
+
+.page { max-width: 1180px; margin: 36px auto; padding: 0 20px; }
+
+.header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+.header h1 { margin:0 0 6px; font-size:28px; letter-spacing:0.4px; }
+.subtle { margin:0; color: var(--muted); font-size:14px; }
+.mode .badge { padding:6px 10px; border-radius:10px; font-size:12px; font-weight:600; }
+.badge.on { background: #e8f5ff; color:#0b6bd2; border:1px solid #cce9ff; }
+.badge.off { background: #eef9f2; color:#0b8f5a; border:1px solid #d7f0e3; }
+
+.card { background: var(--card); border:1px solid var(--border); border-radius:14px; box-shadow: var(--shadow); }
+.toolbar { display:flex; gap:16px; align-items:center; padding:14px 16px; margin-bottom:20px; }
+.checkbox { display:flex; align-items:center; gap:8px; color: var(--text); }
+.checkbox input { width:18px; height:18px; }
+
+.primary { border:none; background: var(--brand); color:#fff; padding:10px 14px; border-radius:10px; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:8px; }
+.primary:disabled { opacity:.6; cursor:not-allowed; }
+.rocket { display:inline-block; transform: translateY(1px); }
+
+.spinner { width:16px; height:16px; border:2px solid #fff; border-top-color: transparent; border-radius:50%; display:inline-block; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.rowBetween { display:flex; justify-content:space-between; align-items:center; margin: 10px 2px 6px; }
+
+.segmented { display:flex; gap:8px; background:#eef2ff; padding:4px; border-radius:10px; }
+.segBtn { border: none; background: transparent; padding:8px 12px; border-radius:8px; font-weight:600; color:#334155; cursor:pointer; }
+.segBtn.active { background:#fff; color: var(--brand); border:1px solid #c7d2fe; }
+.segBtn:disabled { opacity:.5; cursor:not-allowed; }
+
+.empty { padding:22px; text-align:center; color: var(--muted); }
+
+.bigImg { display:block; padding:10px; margin-top:8px; }
+.bigImg img { width:100%; height:auto; max-height: 720px; object-fit: contain; display:block; border-radius:10px; }
+
+.kpiGrid { display:grid; grid-template-columns: repeat(6,1fr); gap:12px; margin: 10px 0 14px; }
+.kpi { padding:12px 14px; }
+.kpiLabel { color: var(--muted); font-size:13px; }
+.kpiValue { margin-top:6px; font-weight:800; font-size:20px; }
+
+.tableCard { padding:0; overflow:hidden; }
+.tableHead, .tableRow { display:grid; grid-template-columns: 1.2fr 1.5fr 1fr 1.5fr 1fr; }
+.tableHead > div { background:#f3f4f6; font-weight:700; color:#475569; padding:10px 14px; border-bottom:1px solid var(--border); }
+.tableRow > div { padding:12px 14px; border-bottom:1px solid var(--border); }
+.tableRow:nth-child(even) > div { background:#fafafa; }
+
+.linkBtn { border:none; background:transparent; color: var(--brand); font-weight:700; cursor:pointer; }
+.code { margin-top:10px; padding:12px; background:#0b1220; color:#e5edff; font-size:12px; border-radius:10px; overflow:auto; }
+.log { margin-top:6px; padding:12px; background:#0b1220; color:#a6b3d0; font-size:12px; border-radius:10px; overflow:auto; }
+
+.footer { margin:30px 0 20px; color: var(--muted); font-size:13px; text-align:left; }
+
+/* === CollapsibleSection styles === */
+.cs-card {
+  border: 1px solid #e5e7eb;           /* gray-200 */
+  background: #ffffff;
+  border-radius: 16px;                  /* ≈ rounded-2xl */
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  overflow: hidden;
+}
+
+/* header 區塊，跟你 Log 樣式同調（粗體大標 + 右側“展開/收合”） */
+.cs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cs-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #111827; /* gray-900 */
+}
+
+.cs-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: #4f46e5; /* indigo-600 */
+  font-size: 16px;
+  font-weight: 600;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.cs-toggle:hover { color: #4338ca; } /* indigo-700 */
+
+.cs-chevron {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+.cs-chevron.rot { transform: rotate(180deg); }
+
+/* 內容區：做高度 & 透明度轉場，視覺接近你現在的 Log 區塊 */
+.cs-body {
+  padding: 0 16px 16px 16px;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+  overflow: hidden;
+}
+.cs-body.closed {
+  max-height: 0;
+  padding-bottom: 0;        /* 收合時不要下面留白 */
+  opacity: 0;
+}
+.cs-body.open {
+  max-height: 2000px;       /* 依據內容量可調 */
+  opacity: 1;
+}
+
+/* 內部 <pre> 看起來像你的 Log 區塊 */
+.cs-body pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  background: #f9fafb;      /* gray-50 */
+  border: 1px solid #f3f4f6;/* gray-100 */
+  border-radius: 12px;
+  padding: 12px;
+  margin: 8px 0 0 0;
+  max-height: 420px;        /* 防止過長撐版面 */
+  overflow: auto;
+  line-height: 1.55;
+}
+
+/* Header 左邊：Logo + 標題 */
+.titleWithLogo {
+  display: flex;
+  align-items: center; /* 垂直置中 h1 那一行 */
+  gap: 1px;           /* 圖片與文字之間距離 */
+}
+
+.tsmcLogo {
+  width: 130px;      /* 可以改 56、60、64 看喜歡的大小 */
+  height: auto;     /* 讓高度自動依比例縮放 */
+  object-fit: contain;
+}
+.tab-bar {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.tab {
+  border: 1px solid #ccc;
+  background: #f7f7f7;
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.tab.active {
+  background: #004b9b;
+  color: #fff;
+  border-color: #004b9b;
+}
+/* 流程 / 模式說明 共用的內部排版 */
+.flowInner {
+  padding: 16px 32px 24px;
+  line-height: 1.8;
+}
+
+.flowInner h2 {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.flowList {
+  padding-left: 1.5em;
+}
+
+.flowNote {
+  margin-top: 12px;
+  color: #555;
+}
+/* 模型流程說明 / 模式說明 共用外框 */
+.modeExplainWrapper {
+  padding: 24px 40px;   /* 這裡可以調整，數字越大越離邊界遠 */
+  line-height: 1.7;
+}
+/* === 右下攝影機 + 遊戲結果卡片 === */
+.video-score-wrapper {
+  position: fixed;
+  right: 32px;
+  bottom: 24px;
+  width: min(520px, 45vw);
+  z-index: 10;
+}
+
+.video-score-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: linear-gradient(180deg, rgba(10,15,40,.9), rgba(10,15,40,.96));
+}
+
+/* 視訊區塊 */
+.video-box {
+  position: relative;
+  width: 100%;
+}
+
+.video-box canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 18px;
+}
+
+/* 下面的小卡排版微調，讓它在卡片裡好看一點 */
+.video-score-card .score-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 1100px) {
+  .video-score-wrapper {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(520px, 95vw);
+  }
+
+  .video-score-card .score-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
