@@ -286,7 +286,7 @@ export default function App() {
       <header className="header">
         {/* 左邊：Logo + 標題 */}
         <div className="titleWithLogo">
-          <img src="/logo.png" alt="TSMC logo" className="tsmcLogo" />
+          <img src={`${import.meta.env.BASE_URL}logo.png`} alt="TSMC logo" className="tsmcLogo" />
           <div>
             <h1>TSMC 股價預測</h1>
             <p className="subtle">API_BASE = {API}</p>
