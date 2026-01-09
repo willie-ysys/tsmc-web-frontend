@@ -17,6 +17,9 @@ export default function App() {
   const [showLog, setShowLog] = useState(false);
   const [showRawSummary, setShowRawSummary] = useState(false);
 
+  // ✅ 新增：避免圖表容器尚未算出尺寸就 render，導致 width/height = -1
+  const [showCharts, setShowCharts] = useState(false);
+
   // 目前顯示的圖種（forecast/backtest）
   const [figTab, setFigTab] = useState("forecast");
 
@@ -35,19 +38,39 @@ export default function App() {
             )
       )
       .then((j) => {
-        console.log("[DBG] summary top keys:", Object.keys(j).slice(0, 6));
-        console.log("[DBG] single_anchor:", j.single_anchor);
+        console.log("[DBG] summary top keys:", Object.keys(j).slice(0, 20));
+
+        // ✅ 修正：summary.json 最外層不一定有 single_anchor，改成更可靠的解析方式
+        const singleAnchor =
+          j?.single_anchor ??
+          j?.single_anchor_eval ??
+          j?.metrics?.single_anchor ??
+          j?.data_model?.single_anchor ??
+          null;
+
+        console.log("[DBG] single_anchor(resolved):", singleAnchor);
       })
       .catch((err) => {
         console.error("[DBG] fetch error:", err);
       });
   }, []); // 放在元件內；避免 Invalid hook call
 
+  // ✅ summary 更新後，延後一個 tick 再顯示圖表，避免 ResponsiveContainer 讀到 0/-1
+  useEffect(() => {
+    if (!summary?.features) {
+      setShowCharts(false);
+      return;
+    }
+    const t = setTimeout(() => setShowCharts(true), 0);
+    return () => clearTimeout(t);
+  }, [summary]);
+
   const run = async () => {
     setLoading(true);
     setImgs([]);
     setSummary(null);
     setLog([]);
+    setShowCharts(false); // ✅ 新增：跑新的結果時先關掉圖表，避免舊 layout 干擾
 
     try {
       // ① 呼叫後端 /run
@@ -78,10 +101,9 @@ export default function App() {
 
       // ⑤ 再試著讀 artifacts/summary.json，把兩邊 merge（檔案內容優先）
       try {
-        const s = await fetch(
-          `${API}/artifacts/summary.json?t=${Date.now()}`,
-          { cache: "no-store" }
-        );
+        const s = await fetch(`${API}/artifacts/summary.json?t=${Date.now()}`, {
+          cache: "no-store",
+        });
         if (s.ok) {
           const fresh = await s.json();
           mergedSummary = { ...(data.summary || {}), ...fresh };
@@ -175,9 +197,7 @@ export default function App() {
             勝率高不一定代表賺錢，需搭配報酬/風險比與樣本數判讀。
           </InfoHint>
         ),
-        value: Number.isFinite(wr1)
-          ? `${(wr1 * 100).toFixed(0)}%`
-          : "—",
+        value: Number.isFinite(wr1) ? `${(wr1 * 100).toFixed(0)}%` : "—",
       },
       {
         label: (
@@ -186,9 +206,7 @@ export default function App() {
             觀察較長期間的穩定度；同樣需搭配獲利/虧損幅度評估。
           </InfoHint>
         ),
-        value: Number.isFinite(wr3)
-          ? `${(wr3 * 100).toFixed(0)}%`
-          : "—",
+        value: Number.isFinite(wr3) ? `${(wr3 * 100).toFixed(0)}%` : "—",
       },
     ];
   }, [summary]);
@@ -286,7 +304,11 @@ export default function App() {
       <header className="header">
         {/* 左邊：Logo + 標題 */}
         <div className="titleWithLogo">
-          <img src={`${import.meta.env.BASE_URL}logo.png`} alt="TSMC logo" className="tsmcLogo" />
+          <img
+            src={`${import.meta.env.BASE_URL}logo.png`}
+            alt="TSMC logo"
+            className="tsmcLogo"
+          />
           <div>
             <h1>TSMC 股價預測</h1>
             <p className="subtle">API_BASE = {API}</p>
@@ -357,9 +379,7 @@ export default function App() {
               <h2>視覺化結果</h2>
               <div className="segmented">
                 <button
-                  className={`segBtn ${
-                    figTab === "forecast" ? "active" : ""
-                  }`}
+                  className={`segBtn ${figTab === "forecast" ? "active" : ""}`}
                   onClick={() => setFigTab("forecast")}
                   disabled={!figureMap.forecast}
                   title={figureMap.forecast ? "" : "沒有可用的預測圖"}
@@ -367,9 +387,7 @@ export default function App() {
                   預測圖
                 </button>
                 <button
-                  className={`segBtn ${
-                    figTab === "backtest" ? "active" : ""
-                  }`}
+                  className={`segBtn ${figTab === "backtest" ? "active" : ""}`}
                   onClick={() => setFigTab("backtest")}
                   disabled={!figureMap.backtest}
                   title={figureMap.backtest ? "" : "沒有可用的回測圖"}
@@ -427,15 +445,9 @@ export default function App() {
                         <div className="tableRow" key={i}>
                           <div>{r.Month}</div>
                           <div>{r.hi_date}</div>
-                          <div>
-                            {Number(r.hi_price)?.toFixed?.(2) ??
-                              r.hi_price}
-                          </div>
+                          <div>{Number(r.hi_price)?.toFixed?.(2) ?? r.hi_price}</div>
                           <div>{r.lo_date}</div>
-                          <div>
-                            {Number(r.lo_price)?.toFixed?.(2) ??
-                              r.lo_price}
-                          </div>
+                          <div>{Number(r.lo_price)?.toFixed?.(2) ?? r.lo_price}</div>
                         </div>
                       ))}
                     </div>
@@ -448,7 +460,6 @@ export default function App() {
           <section>
             <h2>未來三個月每日預測價格</h2>
 
-            {/* 沒有 summary 或沒有 future_3m_daily 的時候顯示提示文字 */}
             {!summary ||
             !Array.isArray(summary.future_3m_daily) ||
             summary.future_3m_daily.length === 0 ? (
@@ -457,7 +468,6 @@ export default function App() {
               </div>
             ) : (
               <div className="card tableCard">
-                {/* 表頭：兩欄（日期 / 預測收盤價） */}
                 <div
                   className="tableHead"
                   style={{ gridTemplateColumns: "1.5fr 1.5fr" }}
@@ -466,7 +476,6 @@ export default function App() {
                   <div>預測收盤價</div>
                 </div>
 
-                {/* 表身：加捲軸，避免 3 個月資料太長把版面撐爆 */}
                 <div style={{ maxHeight: 260, overflowY: "auto" }}>
                   {summary.future_3m_daily.map((d, i) => (
                     <div
@@ -475,10 +484,7 @@ export default function App() {
                       style={{ gridTemplateColumns: "1.5fr 1.5fr" }}
                     >
                       <div>{d.date}</div>
-                      <div>
-                        {Number(d.pred_close)?.toFixed?.(2) ??
-                          d.pred_close}
-                      </div>
+                      <div>{Number(d.pred_close)?.toFixed?.(2) ?? d.pred_close}</div>
                     </div>
                   ))}
                 </div>
@@ -489,16 +495,18 @@ export default function App() {
           {/* ★★★ 特徵值說明（只綁定這一次的 summary） ★★★ */}
           <section>
             <h2>特徵值與重要性</h2>
-            {/* 還沒跑 / 沒有 features 時的提示 */}
             {!summary || !summary.features ? (
               <div className="empty card">
                 <p>尚未執行預測，暫無特徵重要性資料。</p>
               </div>
             ) : (
-              <div className="card" style={{ padding: 16 }}>
-                <FeatureInsights
-                  features={summary.features} // 👈 直接把這次的 features 丟進去
-                />
+              // ✅ 關鍵修正：給圖表區明確 minHeight，避免 ResponsiveContainer 算到 -1
+              <div className="card" style={{ padding: 16, minHeight: 360 }}>
+                {showCharts ? (
+                  <FeatureInsights features={summary.features} />
+                ) : (
+                  <div style={{ opacity: 0.7 }}>圖表載入中…</div>
+                )}
               </div>
             )}
           </section>
@@ -510,21 +518,14 @@ export default function App() {
       )}
 
       {activeTab === "flow" && (
-        <section
-          className="card"
-          style={{ marginTop: 16, padding: "24px 40px" }}   // ⬅️ 新增 padding
-        >
+        <section className="card" style={{ marginTop: 16, padding: "24px 40px" }}>
           <ModelFlow />
         </section>
       )}
 
       {/* ✅ ========== 分頁三：模式說明 ========== */}
       {activeTab === "mode" && (
-        <section
-          className="card"
-          style={{ marginTop: 16, padding: "24px 40px" }}  // 外層跟 flow 一樣
-        >
-          {/* ✅ 新增這個包一層，跟 ModelFlow 裡的一樣 */}
+        <section className="card" style={{ marginTop: 16, padding: "24px 40px" }}>
           <div style={{ padding: "16px", lineHeight: 1.6 }}>
             <h2 style={{ marginTop: 0 }}>FAST MODE 與 FULL MODE 模式說明</h2>
 
@@ -563,8 +564,6 @@ export default function App() {
           </div>
         </section>
       )}
-
-
     </div>
   );
 }
