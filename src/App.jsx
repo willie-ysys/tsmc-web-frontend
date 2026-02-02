@@ -55,12 +55,16 @@ export default function App() {
       });
   }, []); // 放在元件內；避免 Invalid hook call
 
-  // ✅ summary 更新後，延後一個 tick 再顯示圖表，避免 ResponsiveContainer 讀到 0/-1
   useEffect(() => {
-    if (!summary?.features) {
+    const hasTop20 =
+      Array.isArray(summary?.features?.main_top20) &&
+      summary.features.main_top20.length > 0;
+
+    if (!hasTop20) {
       setShowCharts(false);
       return;
     }
+
     const t = setTimeout(() => setShowCharts(true), 0);
     return () => clearTimeout(t);
   }, [summary]);
@@ -495,22 +499,23 @@ export default function App() {
           {/* ★★★ 特徵值說明（只綁定這一次的 summary） ★★★ */}
           <section>
             <h2>特徵值與重要性</h2>
-            {!summary || !summary.features ? (
+
+            {!summary ||
+            !Array.isArray(summary?.features?.main_top20) ||
+            summary.features.main_top20.length === 0 ? (
               <div className="empty card">
                 <p>尚未執行預測，暫無特徵重要性資料。</p>
               </div>
             ) : (
-              // ✅ 關鍵修正：給圖表區明確 minHeight，避免 ResponsiveContainer 算到 -1
               <div className="card" style={{ padding: 16, minHeight: 360 }}>
                 {showCharts ? (
-                  <FeatureInsights features={summary.features} />
+                  <FeatureInsights summary={summary} />
                 ) : (
                   <div style={{ opacity: 0.7 }}>圖表載入中…</div>
                 )}
               </div>
             )}
           </section>
-
           <footer className="footer">
             <span>© {new Date().getFullYear()} — Demo UI</span>
           </footer>
