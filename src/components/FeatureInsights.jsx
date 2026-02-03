@@ -78,6 +78,21 @@ function getFeatureMeta(key) {
 function normalizeData(features) {
   if (!features) return [];
 
+  // ---------- 直接就是陣列的情況（例如 summary.features 是 array） ----------
+  if (Array.isArray(features) && !features.main_top20 && !features.items) {
+    return features
+      .map((d) => ({
+        feature: d.feature || d.name,
+        gain: Number(d.gain ?? 0),
+        perm_rmse: Number(d.perm_rmse ?? 0),
+      }))
+      .filter(
+        (d) =>
+          d.feature &&
+          (Number.isFinite(d.gain) || Number.isFinite(d.perm_rmse))
+      );
+  }
+
   // ---------- 新格式 main_top20 ----------
   if (Array.isArray(features.main_top20)) {
     return features.main_top20
@@ -111,13 +126,16 @@ function normalizeData(features) {
   return [];
 }
 
+
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
 function FeatureInsights({ summary, features, title = "特徵值與重要性" }) {
   // 自動從 summary 抽 features
-  const resolvedFeatures = features ?? summary?.features;
+  const resolvedFeatures =
+    features ??
+    (summary?.features_block?.items ? summary.features_block : summary?.features);
 
   // 抓圖表容器位置
   const chartWrapRef = useRef(null);
