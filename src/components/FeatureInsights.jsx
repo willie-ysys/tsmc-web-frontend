@@ -72,60 +72,42 @@ function getFeatureMeta(key) {
  *   [{ feature: 'XXX', gain: <數值>, perm_rmse: <數值> }, ...]
  *
  * 支援：
+ * - 直接陣列：[{ name, gain, perm_rmse }, ...]   ← 你現在 summary.features 的格式
  * - 新格式：features.main_top20
  * - 舊格式：features.items
  */
 function normalizeData(features) {
   if (!features) return [];
 
-  // ✅ 情況 1：直接就是陣列（例如 summary.features = [...]）
+  let list = null;
+
+  // ① 直接就是陣列（例如 summary.features 或 features_block.items）
   if (Array.isArray(features)) {
-    return features
-      .map((d) => ({
-        feature: d.feature || d.name,
-        gain: Number(d.gain ?? 0),
-        perm_rmse: Number(d.perm_rmse ?? 0),
-      }))
-      .filter(
-        (d) =>
-          d.feature &&
-          (Number.isFinite(d.gain) || Number.isFinite(d.perm_rmse))
-      );
+    list = features;
+  }
+  // ② 新格式：{ main_top20: [...] }
+  else if (Array.isArray(features.main_top20)) {
+    list = features.main_top20;
+  }
+  // ③ 舊格式：{ items: [...] }
+  else if (Array.isArray(features.items)) {
+    list = features.items;
+  } else {
+    return [];
   }
 
-  // ✅ 情況 2：新格式 { main_top20: [...] }
-  if (Array.isArray(features.main_top20)) {
-    return features.main_top20
-      .map((d) => ({
-        feature: d.feature || d.name,
-        gain: Number(d.gain ?? 0),
-        perm_rmse: Number(d.perm_rmse ?? 0),
-      }))
-      .filter(
-        (d) =>
-          d.feature &&
-          (Number.isFinite(d.gain) || Number.isFinite(d.perm_rmse))
-      );
-  }
-
-  // ✅ 情況 3：舊格式 { items: [...] }
-  if (Array.isArray(features.items)) {
-    return features.items
-      .map((d) => ({
-        feature: d.feature || d.name,
-        gain: Number(d.gain ?? 0),
-        perm_rmse: Number(d.perm_rmse ?? 0),
-      }))
-      .filter(
-        (d) =>
-          d.feature &&
-          (Number.isFinite(d.gain) || Number.isFinite(d.perm_rmse))
-      );
-  }
-
-  return [];
+  return list
+    .map((d) => ({
+      feature: d.feature || d.name,
+      gain: Number(d.gain ?? 0),
+      perm_rmse: Number(d.perm_rmse ?? 0),
+    }))
+    .filter(
+      (d) =>
+        d.feature &&
+        (Number.isFinite(d.gain) || Number.isFinite(d.perm_rmse))
+    );
 }
-
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -133,14 +115,17 @@ function clamp(n, min, max) {
 
 function FeatureInsights({ summary, features, title = "特徵值與重要性" }) {
   // 自動從 summary 抽 features
+  // 先用 props.features，其次 summary.features，其次 summary.features_block
   const resolvedFeatures =
     features ??
-    (summary?.features_block?.items ? summary.features_block : summary?.features);
+    summary?.features ??
+    summary?.features_block ??
+    summary?.features_block?.items;
 
   // 抓圖表容器位置
   const chartWrapRef = useRef(null);
 
-  // [ADD] 記錄最後一次滑鼠在圖表內的位置（避免 Recharts 的 coordinate 偶發 undefined）
+  // 記錄最後一次滑鼠在圖表內的位置（避免 Recharts 的 coordinate 偶發 undefined）
   const lastMouseRef = useRef({ x: 0, y: 0 });
 
   /**
@@ -232,7 +217,6 @@ function FeatureInsights({ summary, features, title = "特徵值與重要性" })
                 layout="vertical"
                 margin={{ left: 110, right: 60, top: 10, bottom: 10 }}
                 onMouseMove={(st) => {
-                  // st.chartX / st.chartY 是滑鼠在圖表容器內的座標
                   const x = Number(st?.chartX);
                   const y = Number(st?.chartY);
                   if (Number.isFinite(x) && Number.isFinite(y)) {
@@ -274,10 +258,13 @@ function FeatureInsights({ summary, features, title = "特徵值與重要性" })
                     const rawGain = Number(d?.raw_gain);
                     const rawPerm = Number(d?.raw_perm_rmse);
 
-                    const rawGainStr = Number.isFinite(rawGain) ? rawGain.toFixed(6) : "-";
-                    const rawPermStr = Number.isFinite(rawPerm) ? rawPerm.toFixed(6) : "-";
+                    const rawGainStr = Number.isFinite(rawGain)
+                      ? rawGain.toFixed(6)
+                      : "-";
+                    const rawPermStr = Number.isFinite(rawPerm)
+                      ? rawPerm.toFixed(6)
+                      : "-";
 
-                    // Recharts 給的圖內座標，有時會短暫拿不到；拿不到就用最後滑鼠座標
                     const cx =
                       Number(coordinate?.x) ||
                       Number(lastMouseRef.current?.x) ||
@@ -291,11 +278,9 @@ function FeatureInsights({ summary, features, title = "特徵值與重要性" })
                     const baseLeft = rect ? rect.left : 0;
                     const baseTop = rect ? rect.top : 0;
 
-                    // 偏移避免蓋住滑鼠
                     const offsetX = 14;
                     const offsetY = 14;
 
-                    // tooltip 尺寸估計（用來做 clamping）
                     const tipW = 330;
                     const tipH = 220;
 
