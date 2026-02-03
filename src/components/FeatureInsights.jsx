@@ -78,8 +78,8 @@ function getFeatureMeta(key) {
 function normalizeData(features) {
   if (!features) return [];
 
-  // ---------- 直接就是陣列的情況（例如 summary.features 是 array） ----------
-  if (Array.isArray(features) && !features.main_top20 && !features.items) {
+  // ✅ 情況 1：直接就是陣列（例如 summary.features = [...]）
+  if (Array.isArray(features)) {
     return features
       .map((d) => ({
         feature: d.feature || d.name,
@@ -93,7 +93,7 @@ function normalizeData(features) {
       );
   }
 
-  // ---------- 新格式 main_top20 ----------
+  // ✅ 情況 2：新格式 { main_top20: [...] }
   if (Array.isArray(features.main_top20)) {
     return features.main_top20
       .map((d) => ({
@@ -108,7 +108,7 @@ function normalizeData(features) {
       );
   }
 
-  // ---------- 舊格式 items[] ----------
+  // ✅ 情況 3：舊格式 { items: [...] }
   if (Array.isArray(features.items)) {
     return features.items
       .map((d) => ({
