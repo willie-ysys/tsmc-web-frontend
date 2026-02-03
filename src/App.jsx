@@ -4,7 +4,7 @@ import "./App.css";
 import ModelFlow from "./components/ModelFlow.jsx";
 import InfoHint from "./components/InfoHint.jsx";
 import FeatureInsights from "./components/FeatureInsights";
-
+import FeatureImportanceChart from "./components/FeatureImportanceChart.jsx";
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function App() {
@@ -110,13 +110,23 @@ export default function App() {
         });
         if (s.ok) {
           const fresh = await s.json();
-          mergedSummary = { ...(data.summary || {}), ...fresh };
+          mergedSummary = {
+            ...(data.summary || {}),
+            ...fresh,
+            features: {
+              ...(data.summary?.features || {}),
+              ...(fresh?.features || {}),
+            },
+          };
         }
       } catch (err) {
         console.warn(
           "[run] 讀取 artifacts/summary.json 失敗，改用 /run 回傳的 summary：",
           err
         );
+      }
+      if (mergedSummary && data.summary?.features && !mergedSummary.features) {
+        mergedSummary = { ...mergedSummary, features: data.summary.features };
       }
 
       if (mergedSummary) {
@@ -507,12 +517,13 @@ export default function App() {
                 <p>尚未執行預測，暫無特徵重要性資料。</p>
               </div>
             ) : (
-              <div className="card" style={{ padding: 16, minHeight: 360 }}>
+              <div className="card" style={{ padding: 16, minHeight: 360, overflow: "visible" }}>
                 {showCharts ? (
-                  <FeatureInsights summary={summary} />
+                  <FeatureImportanceChart data={summary.features.main_top20} />
                 ) : (
                   <div style={{ opacity: 0.7 }}>圖表載入中…</div>
                 )}
+
               </div>
             )}
           </section>

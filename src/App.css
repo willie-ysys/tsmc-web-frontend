@@ -253,3 +253,19 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* =========================================================
+   FeatureInsights tooltip 防裁切（新增）
+   需要你在 App.jsx 的特徵卡片加上 className="card featureCard"
+   ========================================================= */
+.featureCard {
+  overflow: visible !important;
+  position: relative;
+  z-index: 5;
+}
+
+/* 若 FeatureInsights 被包在 CollapsibleSection 內，也避免被裁 */
+.cs-card .featureCard,
+.cs-body .featureCard {
+  overflow: visible !important;
+}

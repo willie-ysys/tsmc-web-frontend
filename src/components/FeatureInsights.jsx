@@ -1,5 +1,6 @@
 // src/components/FeatureInsights.jsx
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   BarChart,
   Bar,
@@ -110,12 +111,22 @@ function normalizeData(features) {
   return [];
 }
 
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
 function FeatureInsights({ summary, features, title = "特徵值與重要性" }) {
-  // ✅ 關鍵：自動從 summary 抽 features（避免父層沒傳 features）
+  // 自動從 summary 抽 features
   const resolvedFeatures = features ?? summary?.features;
 
+  // 抓圖表容器位置
+  const chartWrapRef = useRef(null);
+
+  // [ADD] 記錄最後一次滑鼠在圖表內的位置（避免 Recharts 的 coordinate 偶發 undefined）
+  const lastMouseRef = useRef({ x: 0, y: 0 });
+
   /**
-   * ✅ 自動挑 metric：
+   * 自動挑 metric：
    * - 若 gain 全部為 0（或幾乎為 0），就改用 perm_rmse
    * - 否則使用 gain
    */
@@ -123,10 +134,15 @@ function FeatureInsights({ summary, features, title = "特徵值與重要性" })
     const arr = normalizeData(resolvedFeatures);
     if (!arr.length) return "gain";
 
-    const gainSum = arr.reduce((s, d) => s + (Number.isFinite(d.gain) ? d.gain : 0), 0);
-    const permSum = arr.reduce((s, d) => s + (Number.isFinite(d.perm_rmse) ? d.perm_rmse : 0), 0);
+    const gainSum = arr.reduce(
+      (s, d) => s + (Number.isFinite(d.gain) ? d.gain : 0),
+      0
+    );
+    const permSum = arr.reduce(
+      (s, d) => s + (Number.isFinite(d.perm_rmse) ? d.perm_rmse : 0),
+      0
+    );
 
-    // gain 幾乎沒訊號 → 改用 perm_rmse
     if (gainSum <= 1e-12 && permSum > 0) return "perm_rmse";
     return "gain";
   }, [resolvedFeatures]);
@@ -134,27 +150,30 @@ function FeatureInsights({ summary, features, title = "特徵值與重要性" })
   // rows: [{ feature, pct, raw_gain, raw_perm_rmse }]
   const rows = useMemo(() => {
     const arr = normalizeData(resolvedFeatures);
-
     const valueOf = (d) => (metric === "perm_rmse" ? d.perm_rmse : d.gain);
 
-    // 先照 value 排序（大 → 小）
-    arr.sort((a, b) => valueOf(b) - valueOf(a));
+    const sorted = [...arr].sort((a, b) => {
+      const va = Number.isFinite(valueOf(a)) ? valueOf(a) : 0;
+      const vb = Number.isFinite(valueOf(b)) ? valueOf(b) : 0;
+      return vb - va;
+    });
 
-    // 總和用來換算百分比（用全部特徵之和）
-    const total = arr.reduce(
-      (s, d) => s + (Number.isFinite(valueOf(d)) ? valueOf(d) : 0),
-      0
-    );
+    const total = sorted.reduce((s, d) => {
+      const v = valueOf(d);
+      return s + (Number.isFinite(v) ? v : 0);
+    }, 0);
 
-    // 只取前 10 名
-    const top10 = arr.slice(0, 10);
+    const top10 = sorted.slice(0, 10);
 
-    return top10.map((d) => ({
-      feature: d.feature,
-      pct: total > 0 ? (valueOf(d) / total) * 100 : 0,
-      raw_gain: Number.isFinite(d.gain) ? d.gain : 0,
-      raw_perm_rmse: Number.isFinite(d.perm_rmse) ? d.perm_rmse : 0,
-    }));
+    return top10.map((d) => {
+      const v = valueOf(d);
+      return {
+        feature: d.feature,
+        pct: total > 0 && Number.isFinite(v) ? (v / total) * 100 : 0,
+        raw_gain: Number.isFinite(d.gain) ? d.gain : 0,
+        raw_perm_rmse: Number.isFinite(d.perm_rmse) ? d.perm_rmse : 0,
+      };
+    });
   }, [resolvedFeatures, metric]);
 
   const chartData = useMemo(
@@ -178,40 +197,54 @@ function FeatureInsights({ summary, features, title = "特徵值與重要性" })
         </div>
       ) : (
         <div style={{ padding: "12px 8px 0 8px" }}>
-          <p className="subtle" style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.6 }}>
+          <p
+            className="subtle"
+            style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.6 }}
+          >
             圖中顯示的是前 <b>10 名</b> 特徵的 <b>相對重要度（%）</b>，
-            目前以 <b>{metric === "gain" ? "XGBoost Gain" : "Permutation ΔRMSE"}</b>{" "}
+            目前以{" "}
+            <b>{metric === "gain" ? "XGBoost Gain" : "Permutation ΔRMSE"}</b>{" "}
             作為排序與換算基準。（百分比是相對於「全部特徵」的 {metric} 加總）
           </p>
 
-          <div style={{ width: "100%", height: 380 }}>
-            <ResponsiveContainer width="100%" height="100%">
+          <div ref={chartWrapRef} style={{ width: "100%", height: 380 }}>
+            <ResponsiveContainer width="100%" height="100%" debounce={80}>
               <BarChart
                 data={chartData}
                 layout="vertical"
-                // ✅ 拉寬左側，讓 label 不會擠到 bar
                 margin={{ left: 110, right: 60, top: 10, bottom: 10 }}
+                onMouseMove={(st) => {
+                  // st.chartX / st.chartY 是滑鼠在圖表容器內的座標
+                  const x = Number(st?.chartX);
+                  const y = Number(st?.chartY);
+                  if (Number.isFinite(x) && Number.isFinite(y)) {
+                    lastMouseRef.current = { x, y };
+                  }
+                }}
               >
                 <CartesianGrid strokeDasharray="3 3" />
+
                 <XAxis
                   type="number"
-                  tickFormatter={(v) => (Number.isFinite(v) ? `${v.toFixed(1)}%` : v)}
+                  tickFormatter={(v) =>
+                    Number.isFinite(v) ? `${Number(v).toFixed(1)}%` : v
+                  }
                 />
+
                 <YAxis
                   type="category"
                   dataKey="name"
                   width={180}
                   tick={{ fontSize: 12 }}
+                  tickFormatter={(key) => getFeatureMeta(key).zh}
                 />
 
                 <Tooltip
-                  // ✅ 防止 tooltip 被外層 overflow hidden 裁掉：掛到 body
-                  portal={typeof document !== "undefined" ? document.body : undefined}
-                  // ✅ hover 時跟著滑鼠走，體感更像你那張圖
                   cursor={{ fill: "rgba(148, 163, 184, 0.18)" }}
                   wrapperStyle={{ zIndex: 9999, pointerEvents: "none" }}
-                  content={({ active, payload }) => {
+                  content={({ active, payload, coordinate }) => {
                     if (!active || !payload || !payload.length) return null;
+                    if (typeof document === "undefined") return null;
 
                     const d = payload[0]?.payload;
                     const key = d?.name;
@@ -226,42 +259,97 @@ function FeatureInsights({ summary, features, title = "特徵值與重要性" })
                     const rawGainStr = Number.isFinite(rawGain) ? rawGain.toFixed(6) : "-";
                     const rawPermStr = Number.isFinite(rawPerm) ? rawPerm.toFixed(6) : "-";
 
-                    return (
+                    // Recharts 給的圖內座標，有時會短暫拿不到；拿不到就用最後滑鼠座標
+                    const cx =
+                      Number(coordinate?.x) ||
+                      Number(lastMouseRef.current?.x) ||
+                      0;
+                    const cy =
+                      Number(coordinate?.y) ||
+                      Number(lastMouseRef.current?.y) ||
+                      0;
+
+                    const rect = chartWrapRef.current?.getBoundingClientRect?.();
+                    const baseLeft = rect ? rect.left : 0;
+                    const baseTop = rect ? rect.top : 0;
+
+                    // 偏移避免蓋住滑鼠
+                    const offsetX = 14;
+                    const offsetY = 14;
+
+                    // tooltip 尺寸估計（用來做 clamping）
+                    const tipW = 330;
+                    const tipH = 220;
+
+                    const rawLeft = baseLeft + cx + offsetX;
+                    const rawTop = baseTop + cy + offsetY;
+
+                    const vw = window.innerWidth || 1200;
+                    const vh = window.innerHeight || 800;
+
+                    const left = clamp(rawLeft, 8, Math.max(8, vw - tipW - 8));
+                    const top = clamp(rawTop, 8, Math.max(8, vh - tipH - 8));
+
+                    return createPortal(
                       <div
                         style={{
-                          background: "#ffffff",
-                          border: "1px solid #e5e7eb",
-                          borderRadius: 10,
-                          padding: "10px 12px",
-                          boxShadow: "0 10px 24px rgba(15, 23, 42, 0.16)",
-                          maxWidth: 320,
-                          fontSize: 12,
+                          position: "fixed",
+                          left,
+                          top,
+                          zIndex: 999999,
+                          pointerEvents: "none",
                         }}
                       >
-                        <div style={{ fontWeight: 800, marginBottom: 6, fontSize: 13 }}>
-                          {meta.zh}
-                        </div>
+                        <div
+                          style={{
+                            background: "#ffffff",
+                            border: "1px solid #e5e7eb",
+                            borderRadius: 10,
+                            padding: "10px 12px",
+                            boxShadow: "0 10px 24px rgba(15, 23, 42, 0.16)",
+                            maxWidth: 320,
+                            fontSize: 12,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: 800,
+                              marginBottom: 6,
+                              fontSize: 13,
+                            }}
+                          >
+                            {meta.zh}
+                          </div>
 
-                        <div style={{ marginBottom: 6 }}>
-                          相對重要度：<b>{pctStr}</b>
-                        </div>
+                          <div style={{ marginBottom: 6 }}>
+                            相對重要度：<b>{pctStr}</b>
+                          </div>
 
-                        <div style={{ marginBottom: 2 }}>
-                          Gain：<b>{rawGainStr}</b>
-                        </div>
+                          <div style={{ marginBottom: 2 }}>
+                            Gain：<b>{rawGainStr}</b>
+                          </div>
 
-                        <div style={{ marginBottom: 8 }}>
-                          ΔRMSE：<b>{rawPermStr}</b>
-                        </div>
+                          <div style={{ marginBottom: 8 }}>
+                            ΔRMSE：<b>{rawPermStr}</b>
+                          </div>
 
-                        <div style={{ color: "#4b5563", lineHeight: 1.45 }}>
-                          {meta.desc}
-                        </div>
+                          <div style={{ color: "#4b5563", lineHeight: 1.45 }}>
+                            {meta.desc}
+                          </div>
 
-                        <div style={{ marginTop: 8, color: "#6b7280", fontSize: 11, lineHeight: 1.35 }}>
-                          註：% 以全部特徵 {metric} 加總換算；圖表僅顯示前 10 名。
+                          <div
+                            style={{
+                              marginTop: 8,
+                              color: "#6b7280",
+                              fontSize: 11,
+                              lineHeight: 1.35,
+                            }}
+                          >
+                            註：% 以全部特徵 {metric} 加總換算；圖表僅顯示前 10 名。
+                          </div>
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     );
                   }}
                 />
@@ -270,7 +358,6 @@ function FeatureInsights({ summary, features, title = "特徵值與重要性" })
                   dataKey="importance"
                   radius={[6, 6, 6, 6]}
                   fill="#60a5fa"
-                  // ✅ 讓 bar 更好 hover
                   minPointSize={2}
                   isAnimationActive={false}
                 />
