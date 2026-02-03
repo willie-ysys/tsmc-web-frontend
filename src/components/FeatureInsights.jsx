@@ -73,8 +73,8 @@ function getFeatureMeta(key) {
  *
  * 支援：
  * - 直接陣列：[{ name, gain, perm_rmse }, ...]   ← 你現在 summary.features 的格式
- * - 新格式：features.main_top20
- * - 舊格式：features.items
+ * - 新格式：{ main_top20: [...] }
+ * - 舊格式：{ items: [...] }
  */
 function normalizeData(features) {
   if (!features) return [];
@@ -114,13 +114,27 @@ function clamp(n, min, max) {
 }
 
 function FeatureInsights({ summary, features, title = "特徵值與重要性" }) {
-  // 自動從 summary 抽 features
-  // 先用 props.features，其次 summary.features，其次 summary.features_block
+  /**
+   * 🔑 核心修正點：特徵來源優先順序
+   *
+   * 1. 優先用 summary.features（你現在的 summary.json 一定有）
+   * 2. 其次 summary.features_block.items
+   * 3. 再來才用 props.features / features.items
+   *
+   * 這樣就不會被一個怪怪的 features prop 蓋掉真正有資料的 summary.features。
+   */
   const resolvedFeatures =
-    features ??
-    summary?.features ??
-    summary?.features_block ??
-    summary?.features_block?.items;
+    (summary && Array.isArray(summary.features) && summary.features) ||
+    (summary &&
+      summary.features_block &&
+      Array.isArray(summary.features_block.items) &&
+      summary.features_block.items) ||
+    (features && Array.isArray(features) && features) ||
+    (features &&
+      typeof features === "object" &&
+      Array.isArray(features.items) &&
+      features.items) ||
+    null;
 
   // 抓圖表容器位置
   const chartWrapRef = useRef(null);
