@@ -270,38 +270,8 @@ export default function App() {
     ];
   }, [summary]);
 
-  // —— 圖檔自動分類（打分制）——
+  // —— 圖檔自動分類（改成用「檔名序號」穩定分組，避免 forecast/backtest 都抓到同一張）——
   const figureMap = useMemo(() => {
-    const F_KEYS = [
-      "predict",
-      "future",
-      "next",
-      "forecast_next",
-      "freeze_exog",
-      "proj",
-    ];
-    const B_KEYS = [
-      "vs",
-      "actual",
-      "rmse",
-      "backtest",
-      "trigger",
-      "hist",
-      "train",
-      "figure",
-    ];
-
-    const score = (name) => {
-      const n = name.toLowerCase();
-      let f = 0,
-        b = 0;
-      if (F_KEYS.some((k) => n.includes(k))) f += 3;
-      if (B_KEYS.some((k) => n.includes(k))) b += 3;
-      if (/\b0?2\b/.test(n)) f += 2;
-      if (/\b0?1\b/.test(n)) b += 2;
-      return { f, b };
-    };
-
     const items = (imgs || [])
       .map((u) => {
         let filename = "";
@@ -315,35 +285,39 @@ export default function App() {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    let forecast = null,
-      backtest = null;
-    for (const it of items) {
-      const { f, b } = score(it.name);
-      if (f > b && !forecast) {
-        forecast = it.url;
-        continue;
-      }
-      if (b > f && !backtest) {
-        backtest = it.url;
-        continue;
-      }
-    }
+    // 只拿「figure」圖，不要把 feature_importance 當成預測/回測
+    const figureOnly = items.filter((it) => {
+      const n = it.name.toLowerCase();
+      return n.includes("figure") && !n.includes("feature_importance");
+    });
 
-    // 後備：兩張圖常見 01(回測)/02(預測)
-    if ((!forecast || !backtest) && items.length === 2) {
-      const [a, b] = items;
-      const a02 = /(^|[^0-9])0?2([^0-9]|$)/.test(a.name.toLowerCase());
-      const b02 = /(^|[^0-9])0?2([^0-9]|$)/.test(b.name.toLowerCase());
-      if (!forecast) forecast = a02 ? a.url : b02 ? b.url : b.url;
-      if (!backtest) backtest = a02 ? b.url : a.url;
-    }
+    // 從檔名抓序號：例如 20260204_055000_02_figure.png -> 2
+    const getIdx = (name) => {
+      const m = String(name).match(/_(\d{2})_/); // 抓 _02_ 這種
+      return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
+    };
 
-    // 最後保底
-    if (!forecast && items[1]) forecast = items[1].url;
-    if (!backtest && items[0]) backtest = items[0].url;
+    let forecast = null;
+    let backtest = null;
+
+    if (figureOnly.length >= 2) {
+      const sorted = [...figureOnly].sort((a, b) => getIdx(a.name) - getIdx(b.name));
+      // ✅ 規則：小序號當回測，大序號當預測（你現在是 02 和 04）
+      backtest = sorted[0]?.url || null;
+      forecast = sorted[sorted.length - 1]?.url || null;
+    } else if (figureOnly.length === 1) {
+      // 只有一張 figure，就兩個都先指同一張（至少不會空白）
+      backtest = figureOnly[0].url;
+      forecast = figureOnly[0].url;
+    } else {
+      // 沒有 figure，只好用舊保底（避免整頁空）
+      if (items[1]) forecast = items[1].url;
+      if (items[0]) backtest = items[0].url;
+    }
 
     return { forecast, backtest };
   }, [imgs]);
+
 
   // 新圖載入時預設先看「預測圖」，沒有就看回測圖
   useEffect(() => {
