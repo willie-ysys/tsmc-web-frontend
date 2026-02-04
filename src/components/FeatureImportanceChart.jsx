@@ -23,7 +23,9 @@ export default function FeatureImportanceChart({
     const cleaned = arr
       .map((d, idx) => {
         const feature = String(d?.feature ?? d?.name ?? `feature_${idx}`);
-        const importance = Number(d?.importance ?? d?.value ?? d?.gain ?? d?.score ?? 0);
+        const importance = Number(
+          d?.importance ?? d?.value ?? d?.gain ?? d?.score ?? 0
+        );
         const raw = d?.raw ?? d;
         return { feature, importance, raw, _idx: idx };
       })
@@ -39,6 +41,13 @@ export default function FeatureImportanceChart({
     let m = 0;
     for (const r of rows) m = Math.max(m, Math.abs(r.importance));
     return m || 1;
+  }, [rows]);
+
+  // ✅ 新增：用 Top N 的 abs(importance) 加總，計算相對占比（%）
+  const sumAbs = useMemo(() => {
+    let s = 0;
+    for (const r of rows) s += Math.abs(r.importance);
+    return s || 1;
   }, [rows]);
 
   const [tip, setTip] = useState(null);
@@ -60,24 +69,35 @@ export default function FeatureImportanceChart({
   const onLeave = () => setTip(null);
 
   if (!rows.length) {
-    return (
-      <div style={{ opacity: 0.7 }}>
-        目前沒有可用的特徵重要性資料。
-      </div>
-    );
+    return <div style={{ opacity: 0.7 }}>目前沒有可用的特徵重要性資料。</div>;
   }
 
   return (
     <div style={{ width: "100%" }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+        }}
+      >
         <div style={{ fontWeight: 800, fontSize: 16 }}>{title}</div>
-        <div style={{ opacity: 0.7, fontSize: 12 }}>Top {Math.min(rows.length, maxItems)}</div>
+        <div style={{ opacity: 0.7, fontSize: 12 }}>
+          Top {Math.min(rows.length, maxItems)}
+        </div>
       </div>
 
       <div style={{ height, overflow: "auto", marginTop: 12, paddingRight: 6 }}>
         {rows.map((r, i) => {
           const rank = i + 1;
-          const pct = Math.max(0, Math.min(100, (Math.abs(r.importance) / maxVal) * 100));
+          // bar 長度：仍使用 maxVal 做相對比例（維持原本視覺邏輯）
+          const pct = Math.max(
+            0,
+            Math.min(100, (Math.abs(r.importance) / maxVal) * 100)
+          );
+          // ✅ 顯示用：改成 Top N 內相對占比（%）
+          const sharePct = (Math.abs(r.importance) / sumAbs) * 100;
+
           return (
             <div
               key={`${r.feature}-${i}`}
@@ -94,9 +114,7 @@ export default function FeatureImportanceChart({
                 <div style={{ fontWeight: 700 }}>
                   {rank}. {r.feature}
                 </div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>
-                  importance
-                </div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>importance</div>
               </div>
 
               <div
@@ -122,8 +140,16 @@ export default function FeatureImportanceChart({
                 />
               </div>
 
-              <div style={{ textAlign: "right", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 }}>
-                {Number(r.importance).toFixed(6)}
+              <div
+                style={{
+                  textAlign: "right",
+                  fontFamily:
+                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  fontSize: 12,
+                }}
+                title={`raw importance: ${Number(r.importance).toFixed(6)}`}
+              >
+                {sharePct.toFixed(2)}%
               </div>
             </div>
           );
@@ -150,8 +176,27 @@ export default function FeatureImportanceChart({
           <div style={{ fontWeight: 900, fontSize: 13 }}>
             #{tip.rank} {tip.row.feature}
           </div>
+
           <div style={{ marginTop: 6, fontSize: 12, opacity: 0.95 }}>
-            importance: <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>
+            importance:{" "}
+            <span
+              style={{
+                fontFamily:
+                  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              }}
+            >
+              {((Math.abs(tip.row.importance) / sumAbs) * 100).toFixed(2)}%
+            </span>
+          </div>
+
+          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
+            raw importance:{" "}
+            <span
+              style={{
+                fontFamily:
+                  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              }}
+            >
               {Number(tip.row.importance).toFixed(6)}
             </span>
           </div>
