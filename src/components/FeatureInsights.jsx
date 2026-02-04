@@ -141,16 +141,9 @@ function FeatureInsights({ summary, features, title = "特徵值與重要性" })
    * 這樣就不會被一個怪怪的 features prop 蓋掉真正有資料的 summary.features。
    */
   const resolvedFeatures =
-    (summary && Array.isArray(summary.features) && summary.features) ||
-    (summary &&
-      summary.features_block &&
-      Array.isArray(summary.features_block.items) &&
-      summary.features_block.items) ||
-    (features && Array.isArray(features) && features) ||
-    (features &&
-      typeof features === "object" &&
-      Array.isArray(features.items) &&
-      features.items) ||
+    (summary && summary.features) ||
+    (summary && summary.features_block) ||
+    features ||
     null;
 
   // 抓圖表容器位置
