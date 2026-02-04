@@ -79,40 +79,57 @@ function getFeatureMeta(key) {
 function normalizeData(features) {
   if (!features) return [];
 
-  let list = null;
-
-  // ① 直接就是陣列（例如 summary.features 或 features_block.items）
+  // ✅ 先處理「直接就是陣列」的情況（現在 summary.features 就是這種）
   if (Array.isArray(features)) {
-    list = features;
-  }
-  // ② 新格式：{ main_top20: [...] }
-  else if (Array.isArray(features.main_top20)) {
-    list = features.main_top20;
-  }
-  // ③ 舊格式：{ items: [...] }
-  else if (Array.isArray(features.items)) {
-    list = features.items;
-  } else {
-    return [];
+    return features
+      .map((d) => ({
+        feature: d.feature || d.name,
+        gain: Number(d.gain ?? 0),
+        perm_rmse: Number(d.perm_rmse ?? 0),
+      }))
+      .filter(
+        (d) =>
+          d.feature &&
+          (Number.isFinite(d.gain) || Number.isFinite(d.perm_rmse))
+      );
   }
 
-  return list
-    .map((d) => ({
-      feature: d.feature || d.name,
-      gain: Number(d.gain ?? 0),
-      perm_rmse: Number(d.perm_rmse ?? 0),
-    }))
-    .filter(
-      (d) =>
-        d.feature &&
-        (Number.isFinite(d.gain) || Number.isFinite(d.perm_rmse))
-    );
+  // ---------- 新格式 main_top20 ----------
+  if (Array.isArray(features.main_top20)) {
+    return features.main_top20
+      .map((d) => ({
+        feature: d.feature || d.name,
+        gain: Number(d.gain ?? 0),
+        perm_rmse: Number(d.perm_rmse ?? 0),
+      }))
+      .filter(
+        (d) =>
+          d.feature &&
+          (Number.isFinite(d.gain) || Number.isFinite(d.perm_rmse))
+      );
+  }
+
+  // ---------- 舊格式 items[] ----------
+  if (Array.isArray(features.items)) {
+    return features.items
+      .map((d) => ({
+        feature: d.feature || d.name,
+        gain: Number(d.gain ?? 0),
+        perm_rmse: Number(d.perm_rmse ?? 0),
+      }))
+      .filter(
+        (d) =>
+          d.feature &&
+          (Number.isFinite(d.gain) || Number.isFinite(d.perm_rmse))
+      );
+  }
+
+  return [];
 }
-
+/** 🧱 小工具：把數值夾在 [min, max] 之間 */
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
-
 function FeatureInsights({ summary, features, title = "特徵值與重要性" }) {
   /**
    * 🔑 核心修正點：特徵來源優先順序
