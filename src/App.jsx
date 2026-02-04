@@ -5,6 +5,7 @@ import ModelFlow from "./components/ModelFlow.jsx";
 import InfoHint from "./components/InfoHint.jsx";
 import FeatureInsights from "./components/FeatureInsights";
 import FeatureImportanceChart from "./components/FeatureImportanceChart.jsx";
+
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function App() {
@@ -55,19 +56,45 @@ export default function App() {
       });
   }, []); // 放在元件內；避免 Invalid hook call
 
-  useEffect(() => {
-    const hasTop20 =
+  // ✅ 統一特徵重要性資料來源（支援新舊 schema）
+  // [FIX#1] 必須放在 useEffect 使用 featureItems 之前（避免先用再宣告）
+  const featureItems = useMemo(() => {
+    // 舊版：summary.features.main_top20
+    if (
       Array.isArray(summary?.features?.main_top20) &&
-      summary.features.main_top20.length > 0;
+      summary.features.main_top20.length > 0
+    ) {
+      return summary.features.main_top20;
+    }
 
-    if (!hasTop20) {
+    // 新版：summary.features_block.items
+    if (
+      Array.isArray(summary?.features_block?.items) &&
+      summary.features_block.items.length > 0
+    ) {
+      return summary.features_block.items;
+    }
+
+    // 新版：summary.features (array)
+    if (Array.isArray(summary?.features) && summary.features.length > 0) {
+      return summary.features;
+    }
+
+    return [];
+  }, [summary]);
+
+  // [FIX#1] 現在這個 useEffect 才能安全使用 featureItems
+  useEffect(() => {
+    const hasFeatures = Array.isArray(featureItems) && featureItems.length > 0;
+
+    if (!hasFeatures) {
       setShowCharts(false);
       return;
     }
 
     const t = setTimeout(() => setShowCharts(true), 0);
     return () => clearTimeout(t);
-  }, [summary]);
+  }, [featureItems]);
 
   const run = async () => {
     setLoading(true);
@@ -110,13 +137,29 @@ export default function App() {
         });
         if (s.ok) {
           const fresh = await s.json();
+
+          // [FIX#2] features 可能是 Array，不能用 {...} merge 成 object
+          const baseFeatures = (data.summary && data.summary.features) ?? undefined;
+          const freshFeatures = (fresh && fresh.features) ?? undefined;
+
+          const mergedFeatures =
+            Array.isArray(freshFeatures)
+              ? freshFeatures
+              : Array.isArray(baseFeatures)
+              ? baseFeatures
+              : typeof freshFeatures === "object" && freshFeatures
+              ? {
+                  ...(typeof baseFeatures === "object" && baseFeatures ? baseFeatures : {}),
+                  ...freshFeatures,
+                }
+              : typeof baseFeatures === "object" && baseFeatures
+              ? baseFeatures
+              : undefined;
+
           mergedSummary = {
             ...(data.summary || {}),
             ...fresh,
-            features: {
-              ...(data.summary?.features || {}),
-              ...(fresh?.features || {}),
-            },
+            ...(mergedFeatures !== undefined ? { features: mergedFeatures } : {}),
           };
         }
       } catch (err) {
@@ -125,6 +168,8 @@ export default function App() {
           err
         );
       }
+
+      // 這段保留你的原邏輯：避免 features 被吃掉
       if (mergedSummary && data.summary?.features && !mergedSummary.features) {
         mergedSummary = { ...mergedSummary, features: data.summary.features };
       }
@@ -459,9 +504,13 @@ export default function App() {
                         <div className="tableRow" key={i}>
                           <div>{r.Month}</div>
                           <div>{r.hi_date}</div>
-                          <div>{Number(r.hi_price)?.toFixed?.(2) ?? r.hi_price}</div>
+                          <div>
+                            {Number(r.hi_price)?.toFixed?.(2) ?? r.hi_price}
+                          </div>
                           <div>{r.lo_date}</div>
-                          <div>{Number(r.lo_price)?.toFixed?.(2) ?? r.lo_price}</div>
+                          <div>
+                            {Number(r.lo_price)?.toFixed?.(2) ?? r.lo_price}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -498,7 +547,9 @@ export default function App() {
                       style={{ gridTemplateColumns: "1.5fr 1.5fr" }}
                     >
                       <div>{d.date}</div>
-                      <div>{Number(d.pred_close)?.toFixed?.(2) ?? d.pred_close}</div>
+                      <div>
+                        {Number(d.pred_close)?.toFixed?.(2) ?? d.pred_close}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -510,23 +561,24 @@ export default function App() {
           <section>
             <h2>特徵值與重要性</h2>
 
-            {!summary ||
-            !Array.isArray(summary?.features?.main_top20) ||
-            summary.features.main_top20.length === 0 ? (
+            {!summary || !Array.isArray(featureItems) || featureItems.length === 0 ? (
               <div className="empty card">
                 <p>尚未執行預測，暫無特徵重要性資料。</p>
               </div>
             ) : (
-              <div className="card" style={{ padding: 16, minHeight: 360, overflow: "visible" }}>
+              <div
+                className="card"
+                style={{ padding: 16, minHeight: 360, overflow: "visible" }}
+              >
                 {showCharts ? (
-                  <FeatureImportanceChart data={summary.features.main_top20} />
+                  <FeatureImportanceChart data={featureItems} />
                 ) : (
                   <div style={{ opacity: 0.7 }}>圖表載入中…</div>
                 )}
-
               </div>
             )}
           </section>
+
           <footer className="footer">
             <span>© {new Date().getFullYear()} — Demo UI</span>
           </footer>
@@ -534,14 +586,20 @@ export default function App() {
       )}
 
       {activeTab === "flow" && (
-        <section className="card" style={{ marginTop: 16, padding: "24px 40px" }}>
+        <section
+          className="card"
+          style={{ marginTop: 16, padding: "24px 40px" }}
+        >
           <ModelFlow />
         </section>
       )}
 
       {/* ✅ ========== 分頁三：模式說明 ========== */}
       {activeTab === "mode" && (
-        <section className="card" style={{ marginTop: 16, padding: "24px 40px" }}>
+        <section
+          className="card"
+          style={{ marginTop: 16, padding: "24px 40px" }}
+        >
           <div style={{ padding: "16px", lineHeight: 1.6 }}>
             <h2 style={{ marginTop: 0 }}>FAST MODE 與 FULL MODE 模式說明</h2>
 
