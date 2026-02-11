@@ -133,9 +133,12 @@ export default function App() {
       const data = await res.json();
 
       // ② 先把 /run 回傳的 artifacts 存著（當 fallback）
-      const urls = (data.artifacts || [])
-        .filter((n) => typeof n === "string" && n.endsWith(".png"))
-        .map((n) => `${API}/artifacts/${n}?t=${nonce}`);
+      const pngNames = (data.artifacts || [])
+        .filter((n) => typeof n === "string" && n.endsWith(".png"));
+
+      console.log("[DBG] artifacts png names:", pngNames);
+
+      const urls = pngNames.map((n) => `${API}/artifacts/${n}?t=${nonce}`);
       setImgs(urls);
 
       // ③ 先用 /run 回傳的 summary 當 base
@@ -279,20 +282,41 @@ export default function App() {
   // ✅✅✅ 方案 A：圖的來源改成 summary.figures_map（不再猜檔名）
   const figureMap = useMemo(() => {
     const s = summary || {};
-    const m =
-      s?.figures_map ||
-      s?.figures_by_type ||
-      null;
+    const m = s?.figures_map || s?.figures_by_type || null;
 
-    const pickLast = (arr) => {
+    console.log("[DBG] figures_map raw =", m);
+    console.log("[DBG] figures_map keys =", m ? Object.keys(m) : null);
+    console.log("[DBG] figures_map forecast/backtest =", m?.forecast, m?.backtest);
+
+    const pickBest = (arr, want) => {
       if (!Array.isArray(arr) || arr.length === 0) return null;
-      return arr[arr.length - 1];
+
+      const xs = arr
+        .filter((x) => x != null)
+        .map((x) => String(x));
+
+      // 先排除特徵重要性
+      const nonFeature = xs.filter((x) => !x.toLowerCase().includes("feature_importance"));
+
+      const pool = nonFeature.length > 0 ? nonFeature : xs;
+
+      const kws =
+        want === "forecast"
+          ? ["forecast", "vs_actual", "vs. actual", "pred", "figure_forecast", "fr_"]
+          : ["backtest", "bt", "fsm", "sim", "trade", "pnl", "equity", "figure_backtest", "br_"];
+      // 先找最符合關鍵字的
+      const hit = pool.find((x) => kws.some((k) => x.toLowerCase().includes(k)));
+      if (hit) return hit;
+
+      // 找不到就退回最後一個（但至少已排除 feature_importance）
+      return pool[pool.length - 1];
     };
+
 
     // 1) 優先使用後端提供的分類
     if (m && typeof m === "object") {
-      const forecast = toArtifactUrl(pickLast(m.forecast));
-      const backtest = toArtifactUrl(pickLast(m.backtest));
+      const forecast = toArtifactUrl(pickBest(m.forecast, "forecast"));
+      const backtest = toArtifactUrl(pickBest(m.backtest, "backtest"));
       return { forecast, backtest };
     }
 
