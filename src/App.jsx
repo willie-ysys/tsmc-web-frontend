@@ -11,7 +11,7 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard"); // ⬅️ 全頁分頁：預設是主介面
   const [loading, setLoading] = useState(false);
-  const [imgs, setImgs] = useState([]); // 後端 artifacts 的所有圖檔 URL
+  const [imgs, setImgs] = useState([]); // 後端 artifacts 的所有圖檔 URL（保留：作為 fallback）
   const [summary, setSummary] = useState(null);
   const [log, setLog] = useState([]);
   const [fastMode, setFastMode] = useState(true);
@@ -23,6 +23,9 @@ export default function App() {
 
   // 目前顯示的圖種（forecast/backtest）
   const [figTab, setFigTab] = useState("forecast");
+
+  // ✅ 新增：讓同一次 run 的所有圖片都用同一個 cache bust key
+  const [runNonce, setRunNonce] = useState(Date.now());
 
   // [TEMP DEBUG] 進頁就試抓 summary.json 並把關鍵資訊印到 Console
   useEffect(() => {
@@ -39,25 +42,15 @@ export default function App() {
             )
       )
       .then((j) => {
-        console.log("[DBG] summary top keys:", Object.keys(j).slice(0, 20));
-
-        // ✅ 修正：summary.json 最外層不一定有 single_anchor，改成更可靠的解析方式
-        const singleAnchor =
-          j?.single_anchor ??
-          j?.single_anchor_eval ??
-          j?.metrics?.single_anchor ??
-          j?.data_model?.single_anchor ??
-          null;
-
-        console.log("[DBG] single_anchor(resolved):", singleAnchor);
+        console.log("[DBG] summary top keys:", Object.keys(j).slice(0, 30));
+        console.log("[DBG] has figures_map:", !!j?.figures_map, "has figures_by_type:", !!j?.figures_by_type);
       })
       .catch((err) => {
         console.error("[DBG] fetch error:", err);
       });
-  }, []); // 放在元件內；避免 Invalid hook call
+  }, []);
 
   // ✅ 統一特徵重要性資料來源（支援新舊 schema）
-  // [FIX#1] 必須放在 useEffect 使用 featureItems 之前（避免先用再宣告）
   const featureItems = useMemo(() => {
     // 舊版：summary.features.main_top20
     if (
@@ -83,7 +76,6 @@ export default function App() {
     return [];
   }, [summary]);
 
-  // [FIX#1] 現在這個 useEffect 才能安全使用 featureItems
   useEffect(() => {
     const hasFeatures = Array.isArray(featureItems) && featureItems.length > 0;
 
@@ -96,12 +88,32 @@ export default function App() {
     return () => clearTimeout(t);
   }, [featureItems]);
 
+  // ✅ 把後端給的 path/filename 統一轉成可用 URL
+  const toArtifactUrl = (p) => {
+    if (!p) return null;
+    const s = String(p);
+
+    // 已經是完整 URL
+    if (s.startsWith("http://") || s.startsWith("https://")) {
+      return `${s}${s.includes("?") ? "&" : "?"}t=${runNonce}`;
+    }
+
+    // 可能是 artifacts/xxx.png 或 /artifacts/xxx.png 或純檔名 xxx.png
+    let name = s;
+    if (name.includes("/")) name = name.split("/").pop();
+    return `${API}/artifacts/${name}?t=${runNonce}`;
+  };
+
   const run = async () => {
     setLoading(true);
     setImgs([]);
     setSummary(null);
     setLog([]);
-    setShowCharts(false); // ✅ 新增：跑新的結果時先關掉圖表，避免舊 layout 干擾
+    setShowCharts(false);
+
+    // ✅ 這次 run 的 cache bust key 固定住
+    const nonce = Date.now();
+    setRunNonce(nonce);
 
     try {
       // ① 呼叫後端 /run
@@ -111,7 +123,6 @@ export default function App() {
         body: JSON.stringify({ fast_mode: fastMode }),
       });
 
-      // ② 如果 HTTP 狀態碼不是 200，先把文字印出來方便 debug
       if (!res.ok) {
         const text = await res.text().catch(() => "");
         console.error("[/run] HTTP error:", res.status, text);
@@ -121,24 +132,24 @@ export default function App() {
 
       const data = await res.json();
 
-      // ③ 圖檔（加上 cache-busting）
+      // ② 先把 /run 回傳的 artifacts 存著（當 fallback）
       const urls = (data.artifacts || [])
         .filter((n) => typeof n === "string" && n.endsWith(".png"))
-        .map((n) => `${API}/artifacts/${n}?t=${Date.now()}`);
+        .map((n) => `${API}/artifacts/${n}?t=${nonce}`);
       setImgs(urls);
 
-      // ④ 先用 /run 回傳的 summary 當 base
+      // ③ 先用 /run 回傳的 summary 當 base
       let mergedSummary = data.summary || null;
 
-      // ⑤ 再試著讀 artifacts/summary.json，把兩邊 merge（檔案內容優先）
+      // ④ 再讀 artifacts/summary.json（檔案內容優先）
       try {
-        const s = await fetch(`${API}/artifacts/summary.json?t=${Date.now()}`, {
+        const s = await fetch(`${API}/artifacts/summary.json?t=${nonce}`, {
           cache: "no-store",
         });
         if (s.ok) {
           const fresh = await s.json();
 
-          // [FIX#2] features 可能是 Array，不能用 {...} merge 成 object
+          // [FIX] features 可能是 Array，不能用 {...} merge 成 object
           const baseFeatures = (data.summary && data.summary.features) ?? undefined;
           const freshFeatures = (fresh && fresh.features) ?? undefined;
 
@@ -169,16 +180,13 @@ export default function App() {
         );
       }
 
-      // 這段保留你的原邏輯：避免 features 被吃掉
       if (mergedSummary && data.summary?.features && !mergedSummary.features) {
         mergedSummary = { ...mergedSummary, features: data.summary.features };
       }
 
-      if (mergedSummary) {
-        setSummary(mergedSummary);
-      }
+      if (mergedSummary) setSummary(mergedSummary);
 
-      // ⑥ Log
+      // ⑤ Log
       setLog([...(data.stderr_tail || []), ...(data.stdout_tail || [])]);
 
       if (!data.ok) {
@@ -195,7 +203,6 @@ export default function App() {
   const kpis = useMemo(() => {
     const s = summary || {};
 
-    // RMSE 優先讀 single_anchor，其次 single_anchor_eval，再其次 metrics
     const rmse1 =
       s?.single_anchor?.rmse_1M ??
       s?.single_anchor_eval?.rmse_1m ??
@@ -206,7 +213,6 @@ export default function App() {
       s?.single_anchor_eval?.rmse_3m ??
       s?.metrics?.rmse_3m;
 
-    // 交易數 / 勝率：優先用 fsm_1m / fsm_3m，如果有 headline 欄位也支援
     const n1 = s?.fsm_1m?.n_trades ?? s?.trades_1m ?? 0;
     const n3 = s?.fsm_3m?.n_trades ?? s?.trades_3m ?? 0;
     const wr1 = s?.fsm_1m?.win_rate ?? s?.winrate_1m;
@@ -270,8 +276,27 @@ export default function App() {
     ];
   }, [summary]);
 
-  // —— 圖檔自動分類（改成用「檔名序號」穩定分組，避免 forecast/backtest 都抓到同一張）——
+  // ✅✅✅ 方案 A：圖的來源改成 summary.figures_map（不再猜檔名）
   const figureMap = useMemo(() => {
+    const s = summary || {};
+    const m =
+      s?.figures_map ||
+      s?.figures_by_type ||
+      null;
+
+    const pickLast = (arr) => {
+      if (!Array.isArray(arr) || arr.length === 0) return null;
+      return arr[arr.length - 1];
+    };
+
+    // 1) 優先使用後端提供的分類
+    if (m && typeof m === "object") {
+      const forecast = toArtifactUrl(pickLast(m.forecast));
+      const backtest = toArtifactUrl(pickLast(m.backtest));
+      return { forecast, backtest };
+    }
+
+    // 2) fallback：沿用你原本 imgs 的作法（避免沒上後端就整頁空白）
     const items = (imgs || [])
       .map((u) => {
         let filename = "";
@@ -285,15 +310,13 @@ export default function App() {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // 只拿「figure」圖，不要把 feature_importance 當成預測/回測
     const figureOnly = items.filter((it) => {
       const n = it.name.toLowerCase();
       return n.includes("figure") && !n.includes("feature_importance");
     });
 
-    // 從檔名抓序號：例如 20260204_055000_02_figure.png -> 2
     const getIdx = (name) => {
-      const m = String(name).match(/_(\d{2})_/); // 抓 _02_ 這種
+      const m = String(name).match(/_(\d{2})_/);
       return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
     };
 
@@ -302,40 +325,29 @@ export default function App() {
 
     if (figureOnly.length >= 2) {
       const sorted = [...figureOnly].sort((a, b) => getIdx(a.name) - getIdx(b.name));
-      // ✅ 規則：小序號當回測，大序號當預測（你現在是 02 和 04）
       backtest = sorted[0]?.url || null;
       forecast = sorted[sorted.length - 1]?.url || null;
     } else if (figureOnly.length === 1) {
-      // 只有一張 figure，就兩個都先指同一張（至少不會空白）
       backtest = figureOnly[0].url;
       forecast = figureOnly[0].url;
     } else {
-      // 沒有 figure，只好用舊保底（避免整頁空）
       if (items[1]) forecast = items[1].url;
       if (items[0]) backtest = items[0].url;
     }
 
     return { forecast, backtest };
-  }, [imgs]);
+  }, [summary, imgs, runNonce]);
 
-
-  // 新圖載入時預設先看「預測圖」，沒有就看回測圖
   useEffect(() => {
     if (figureMap.forecast) setFigTab("forecast");
     else if (figureMap.backtest) setFigTab("backtest");
   }, [figureMap.forecast, figureMap.backtest]);
 
-  const currentImg =
-    figTab === "forecast" ? figureMap.forecast : figureMap.backtest;
+  const currentImg = figTab === "forecast" ? figureMap.forecast : figureMap.backtest;
 
-  // ==========================
-  //          JSX
-  // ==========================
   return (
     <div className="page">
-      {/* Header */}
       <header className="header">
-        {/* 左邊：Logo + 標題 */}
         <div className="titleWithLogo">
           <img
             src={`${import.meta.env.BASE_URL}logo.png`}
@@ -348,7 +360,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 右邊：模式 badge */}
         <div className="mode">
           <span className={`badge ${fastMode ? "on" : "off"}`}>
             {fastMode ? "FAST MODE" : "FULL MODE"}
@@ -356,7 +367,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* 🔻🔻 全頁分頁切換列 🔻🔻 */}
       <div className="tab-bar">
         <button
           className={`tab ${activeTab === "dashboard" ? "active" : ""}`}
@@ -370,7 +380,6 @@ export default function App() {
         >
           模型流程說明
         </button>
-        {/* ✅ 新增：模式說明分頁按鈕 */}
         <button
           className={`tab ${activeTab === "mode" ? "active" : ""}`}
           onClick={() => setActiveTab("mode")}
@@ -378,12 +387,9 @@ export default function App() {
           模式說明
         </button>
       </div>
-      {/* 🔺🔺 全頁分頁切換列 🔺🔺 */}
 
-      {/* ========== 分頁一：原本的主畫面（全部包在 activeTab === "dashboard" 裡） ========== */}
       {activeTab === "dashboard" && (
         <>
-          {/* Toolbar */}
           <section className="toolbar card">
             <label className="checkbox">
               <input
@@ -406,7 +412,6 @@ export default function App() {
             </button>
           </section>
 
-          {/* 圖區：單張大圖 + 分段切換 */}
           <section>
             <div className="rowBetween">
               <h2>視覺化結果</h2>
@@ -435,18 +440,12 @@ export default function App() {
                 <p>尚未產生圖表。請點「執行預測」。</p>
               </div>
             ) : (
-              <a
-                className="bigImg card"
-                href={currentImg}
-                target="_blank"
-                rel="noreferrer"
-              >
+              <a className="bigImg card" href={currentImg} target="_blank" rel="noreferrer">
                 <img src={currentImg} alt={`figure-${figTab}`} />
               </a>
             )}
           </section>
 
-          {/* 摘要 */}
           <section>
             <h2>摘要</h2>
             {!summary ? (
@@ -464,51 +463,40 @@ export default function App() {
                   ))}
                 </div>
 
-                {Array.isArray(summary?.monthly_extrema) &&
-                  summary.monthly_extrema.length > 0 && (
-                    <div className="card tableCard">
-                      <div className="tableHead">
-                        <div>月份</div>
-                        <div>預測高點日期</div>
-                        <div>高點價</div>
-                        <div>預測低點日期</div>
-                        <div>低點價</div>
-                      </div>
-                      {summary.monthly_extrema.map((r, i) => (
-                        <div className="tableRow" key={i}>
-                          <div>{r.Month}</div>
-                          <div>{r.hi_date}</div>
-                          <div>
-                            {Number(r.hi_price)?.toFixed?.(2) ?? r.hi_price}
-                          </div>
-                          <div>{r.lo_date}</div>
-                          <div>
-                            {Number(r.lo_price)?.toFixed?.(2) ?? r.lo_price}
-                          </div>
-                        </div>
-                      ))}
+                {Array.isArray(summary?.monthly_extrema) && summary.monthly_extrema.length > 0 && (
+                  <div className="card tableCard">
+                    <div className="tableHead">
+                      <div>月份</div>
+                      <div>預測高點日期</div>
+                      <div>高點價</div>
+                      <div>預測低點日期</div>
+                      <div>低點價</div>
                     </div>
-                  )}
+                    {summary.monthly_extrema.map((r, i) => (
+                      <div className="tableRow" key={i}>
+                        <div>{r.Month}</div>
+                        <div>{r.hi_date}</div>
+                        <div>{Number(r.hi_price)?.toFixed?.(2) ?? r.hi_price}</div>
+                        <div>{r.lo_date}</div>
+                        <div>{Number(r.lo_price)?.toFixed?.(2) ?? r.lo_price}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </section>
 
-          {/* 未來三個月每日股價預測 */}
           <section>
             <h2>未來三個月每日預測價格</h2>
 
-            {!summary ||
-            !Array.isArray(summary.future_3m_daily) ||
-            summary.future_3m_daily.length === 0 ? (
+            {!summary || !Array.isArray(summary.future_3m_daily) || summary.future_3m_daily.length === 0 ? (
               <div className="empty card">
                 <p>尚未有每日預測資料。</p>
               </div>
             ) : (
               <div className="card tableCard">
-                <div
-                  className="tableHead"
-                  style={{ gridTemplateColumns: "1.5fr 1.5fr" }}
-                >
+                <div className="tableHead" style={{ gridTemplateColumns: "1.5fr 1.5fr" }}>
                   <div>日期</div>
                   <div>預測收盤價</div>
                 </div>
@@ -521,9 +509,7 @@ export default function App() {
                       style={{ gridTemplateColumns: "1.5fr 1.5fr" }}
                     >
                       <div>{d.date}</div>
-                      <div>
-                        {Number(d.pred_close)?.toFixed?.(2) ?? d.pred_close}
-                      </div>
+                      <div>{Number(d.pred_close)?.toFixed?.(2) ?? d.pred_close}</div>
                     </div>
                   ))}
                 </div>
@@ -531,7 +517,6 @@ export default function App() {
             )}
           </section>
 
-          {/* ★★★ 特徵值說明（只綁定這一次的 summary） ★★★ */}
           <section>
             <h2>特徵值與重要性</h2>
 
@@ -540,15 +525,8 @@ export default function App() {
                 <p>尚未執行預測，暫無特徵重要性資料。</p>
               </div>
             ) : (
-              <div
-                className="card"
-                style={{ padding: 16, minHeight: 360, overflow: "visible" }}
-              >
-                {showCharts ? (
-                  <FeatureImportanceChart data={featureItems} />
-                ) : (
-                  <div style={{ opacity: 0.7 }}>圖表載入中…</div>
-                )}
+              <div className="card" style={{ padding: 16, minHeight: 360, overflow: "visible" }}>
+                {showCharts ? <FeatureImportanceChart data={featureItems} /> : <div style={{ opacity: 0.7 }}>圖表載入中…</div>}
               </div>
             )}
           </section>
@@ -560,20 +538,13 @@ export default function App() {
       )}
 
       {activeTab === "flow" && (
-        <section
-          className="card"
-          style={{ marginTop: 16, padding: "24px 40px" }}
-        >
+        <section className="card" style={{ marginTop: 16, padding: "24px 40px" }}>
           <ModelFlow />
         </section>
       )}
 
-      {/* ✅ ========== 分頁三：模式說明 ========== */}
       {activeTab === "mode" && (
-        <section
-          className="card"
-          style={{ marginTop: 16, padding: "24px 40px" }}
-        >
+        <section className="card" style={{ marginTop: 16, padding: "24px 40px" }}>
           <div style={{ padding: "16px", lineHeight: 1.6 }}>
             <h2 style={{ marginTop: 0 }}>FAST MODE 與 FULL MODE 模式說明</h2>
 
