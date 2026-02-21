@@ -43,7 +43,7 @@ export default function App() {
       )
       .then((j) => {
         console.log("[DBG] summary top keys:", Object.keys(j).slice(0, 30));
-        console.log("[DBG] has figures_map:", !!j?.figures_map, "has figures_by_type:", !!j?.figures_by_type);
+        console.log("[DBG] has figures:", !!j?.figures, "figures keys:", j?.figures ? Object.keys(j.figures) : null);
       })
       .catch((err) => {
         console.error("[DBG] fetch error:", err);
@@ -278,49 +278,23 @@ export default function App() {
       },
     ];
   }, [summary]);
-
-  // ✅✅✅ 方案 A：圖的來源改成 summary.figures_map（不再猜檔名）
+  // ✅✅✅ 方案 A（正確版）：直接讀 summary.figures（後端已分類好）
   const figureMap = useMemo(() => {
     const s = summary || {};
-    const m = s?.figures_map || s?.figures_by_type || null;
+    const figs = s?.figures || null; // ✅ 後端新的欄位：{forecast, backtest, features, other}
 
-    console.log("[DBG] figures_map raw =", m);
-    console.log("[DBG] figures_map keys =", m ? Object.keys(m) : null);
-    console.log("[DBG] figures_map forecast/backtest =", m?.forecast, m?.backtest);
+    // 1) 優先使用後端提供的分類（完全不靠順序、不猜檔名）
+    if (figs && typeof figs === "object") {
+      const forecastArr = Array.isArray(figs.forecast) ? figs.forecast : [];
+      const backtestArr = Array.isArray(figs.backtest) ? figs.backtest : [];
 
-    const pickBest = (arr, want) => {
-      if (!Array.isArray(arr) || arr.length === 0) return null;
+      const forecast = toArtifactUrl(forecastArr[0] || null);
+      const backtest = toArtifactUrl(backtestArr[0] || null);
 
-      const xs = arr
-        .filter((x) => x != null)
-        .map((x) => String(x));
-
-      // 先排除特徵重要性
-      const nonFeature = xs.filter((x) => !x.toLowerCase().includes("feature_importance"));
-
-      const pool = nonFeature.length > 0 ? nonFeature : xs;
-
-      const kws =
-        want === "forecast"
-          ? ["forecast", "vs_actual", "vs. actual", "pred", "figure_forecast", "fr_"]
-          : ["backtest", "bt", "fsm", "sim", "trade", "pnl", "equity", "figure_backtest", "br_"];
-      // 先找最符合關鍵字的
-      const hit = pool.find((x) => kws.some((k) => x.toLowerCase().includes(k)));
-      if (hit) return hit;
-
-      // 找不到就退回最後一個（但至少已排除 feature_importance）
-      return pool[pool.length - 1];
-    };
-
-
-    // 1) 優先使用後端提供的分類
-    if (m && typeof m === "object") {
-      const forecast = toArtifactUrl(pickBest(m.forecast, "forecast"));
-      const backtest = toArtifactUrl(pickBest(m.backtest, "backtest"));
       return { forecast, backtest };
     }
 
-    // 2) fallback：沿用你原本 imgs 的作法（避免沒上後端就整頁空白）
+    // 2) fallback：沿用你原本 imgs 的作法（避免後端還沒上新格式就整頁空白）
     const items = (imgs || [])
       .map((u) => {
         let filename = "";
@@ -334,11 +308,13 @@ export default function App() {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    const figureOnly = items.filter((it) => {
-      const n = it.name.toLowerCase();
-      return n.includes("figure") && !n.includes("feature_importance");
-    });
+    // 先排除特徵重要性圖，避免回測 tab 抓到 features
+    const nonFeature = items.filter((it) => !it.name.toLowerCase().includes("feature_importance"));
 
+    // 只抓 figure 類的圖
+    const figureOnly = nonFeature.filter((it) => it.name.toLowerCase().includes("figure"));
+
+    // 依序號排序：_01_, _02_...
     const getIdx = (name) => {
       const m = String(name).match(/_(\d{2})_/);
       return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
@@ -352,15 +328,18 @@ export default function App() {
       backtest = sorted[0]?.url || null;
       forecast = sorted[sorted.length - 1]?.url || null;
     } else if (figureOnly.length === 1) {
+      // 只有一張 figure，就兩邊都顯示同一張（至少不會顯示到 features）
       backtest = figureOnly[0].url;
       forecast = figureOnly[0].url;
     } else {
-      if (items[1]) forecast = items[1].url;
-      if (items[0]) backtest = items[0].url;
+      // 真的沒 figure，最後才退回 imgs
+      if (nonFeature[1]) forecast = nonFeature[1].url;
+      if (nonFeature[0]) backtest = nonFeature[0].url;
     }
 
     return { forecast, backtest };
   }, [summary, imgs, runNonce]);
+
 
   useEffect(() => {
     if (figureMap.forecast) setFigTab("forecast");
